@@ -8,11 +8,18 @@ load_dotenv()
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_KEY"))
 
 
+def num(val, default=0.0) -> float:
+    try:
+        return float(val) if val is not None else default
+    except (ValueError, TypeError):
+        return default
+
+
 def criterios_graham(ind: dict) -> dict:
-    p_l = ind.get("p_l") or 0
-    p_vp = ind.get("p_vp") or 0
-    roe = ind.get("roe") or 0
-    net_margin = ind.get("net_margin") or 0
+    p_l = num(ind.get("p_l"))
+    p_vp = num(ind.get("p_vp"))
+    roe = num(ind.get("roe"))
+    net_margin = num(ind.get("net_margin"))
 
     criterios = {
         "p_l_baixo": p_l > 0 and p_l < 15,
@@ -26,13 +33,13 @@ def criterios_graham(ind: dict) -> dict:
 
 
 def criterios_bazin(ind: dict) -> dict:
-    dy = ind.get("dividend_yield") or 0
-    p_l = ind.get("p_l") or 0
+    dy = num(ind.get("dividend_yield"))
+    p_l = num(ind.get("p_l"))
 
     criterios = {
         "dy_acima_6pct": dy >= 6.0,
         "p_l_razoavel": 0 < p_l < 20,
-        "lucro_positivo": (ind.get("net_margin") or 0) > 0,
+        "lucro_positivo": num(ind.get("net_margin")) > 0,
     }
     aprovados = sum(criterios.values())
     score = round((aprovados / len(criterios)) * 100)
@@ -40,13 +47,13 @@ def criterios_bazin(ind: dict) -> dict:
 
 
 def criterios_lynch(ind: dict) -> dict:
-    p_l = ind.get("p_l") or 0
-    roe = ind.get("roe") or 0
+    p_l = num(ind.get("p_l"))
+    roe = num(ind.get("roe"))
 
     criterios = {
         "p_l_crescimento": 0 < p_l < 30,
         "roe_solido": roe > 0.15,
-        "margem_positiva": (ind.get("net_margin") or 0) > 0,
+        "margem_positiva": num(ind.get("net_margin")) > 0,
     }
     aprovados = sum(criterios.values())
     score = round((aprovados / len(criterios)) * 100)
@@ -54,13 +61,13 @@ def criterios_lynch(ind: dict) -> dict:
 
 
 def criterios_housel(ind: dict) -> dict:
-    dy = ind.get("dividend_yield") or 0
-    p_vp = ind.get("p_vp") or 0
+    dy = num(ind.get("dividend_yield"))
+    p_vp = num(ind.get("p_vp"))
 
     criterios = {
         "dividend_consistente": dy > 0,
         "valuation_justo": 0 < p_vp < 3,
-        "margem_positiva": (ind.get("net_margin") or 0) > 0,
+        "margem_positiva": num(ind.get("net_margin")) > 0,
     }
     aprovados = sum(criterios.values())
     score = round((aprovados / len(criterios)) * 100)
