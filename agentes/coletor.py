@@ -28,8 +28,12 @@ def buscar_todos_tickers() -> list[str]:
         t = s.get("stock", "")
         if not t:
             continue
-        # Exclui BDRs (6 chars terminando em dígitos: PETR34, MSFT34, etc.)
-        if len(t) == 6 and t[-2:].isdigit():
+        # Exclui BDRs (terminam em 2 dígitos tipo 34, 35: AAPL34, GOOGL34)
+        # Mantém "11" pois é sufixo de FIIs e ETFs (HGLG11, BOVA11)
+        if t[-2:].isdigit() and t[-2:] != "11":
+            continue
+        # Exclui mercado fracionário (mesmo ativo do lote padrão, lote de 1-99)
+        if t.endswith("F"):
             continue
         if len(t) >= 4 and t[:4].isalpha():
             tickers.append(t)
