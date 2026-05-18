@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from urllib.parse import quote
 
+import cloudscraper
 import requests
 import yfinance as yf
 from dotenv import load_dotenv
@@ -23,6 +24,14 @@ SI_HEADERS = {
     "Accept": "application/json, text/javascript, */*; q=0.01",
     "X-Requested-With": "XMLHttpRequest",
 }
+
+# Cloudflare bloqueia IPs de datacenter (GitHub Actions) com 403 mesmo com User-Agent
+# realista. O cloudscraper resolve o JS challenge automaticamente. Em rede residencial
+# o requests puro também funciona, mas mantemos o scraper em todos os ambientes para
+# uniformizar o comportamento.
+si_session = cloudscraper.create_scraper(
+    browser={"browser": "chrome", "platform": "windows", "mobile": False}
+)
 
 # Setores no Status Invest (numeração interna da API, descoberta empiricamente).
 # Total observado: ~557 ações ativas. Setores 2 e 4 batem em 100 (limite duro da
@@ -50,7 +59,7 @@ def si_advanced_search(category_type: int, sector: int | None = None) -> list[di
     search = {"Sector": str(sector), "SubSector": "", "Segment": ""} if sector else {}
     url = f"{SI_BASE}/category/advancedsearchresult?CategoryType={category_type}&search={quote(json.dumps(search))}"
     referer = f"{SI_BASE}/{'acoes' if category_type == 1 else 'fundos-imobiliarios'}/busca-avancada"
-    resp = requests.post(url, headers={**SI_HEADERS, "Referer": referer}, timeout=30)
+    resp = si_session.post(url, headers={**SI_HEADERS, "Referer": referer}, timeout=30)
     resp.raise_for_status()
     data = resp.json()
     if not isinstance(data, list):
@@ -66,7 +75,7 @@ def si_dy(ticker: str) -> float | None:
     usamos o indicatorhistoricallist que tem o histórico completo por indicador.
     """
     try:
-        resp = requests.post(
+        resp = si_session.post(
             f"{SI_BASE}/acao/indicatorhistoricallist",
             headers={**SI_HEADERS, "Referer": f"{SI_BASE}/acoes/{ticker.lower()}"},
             data={"codes": ticker, "time": 7, "byQuarter": "false", "futureData": "false"},
