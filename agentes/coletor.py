@@ -94,11 +94,20 @@ def buscar_cotacoes(tickers: list[str]) -> list[dict]:
         if price is None:
             price = info.get("regularMarketPrice") or info.get("currentPrice")
 
+        # Diferencia FII de ETF — ambos terminam em 11, mas têm naturezas distintas.
+        # yfinance retorna quoteType="ETF" para fundos de índice (BOVA11, IVVB11)
+        # e quoteType="EQUITY" para FIIs e ações.
+        quote_type = (info.get("quoteType") or "").upper()
+        if ticker.endswith("11"):
+            asset_type = "etf" if quote_type == "ETF" else "fii"
+        else:
+            asset_type = "stock"
+
         resultados.append({
             "ticker": ticker,
             "name": info.get("longName") or info.get("shortName", ""),
             "sector": info.get("sector", ""),
-            "type": "fii" if ticker.endswith("11") else "stock",
+            "type": asset_type,
             "price": price,
             "change_pct": change_pct,
             "volume": info.get("regularMarketVolume") or info.get("volume"),
