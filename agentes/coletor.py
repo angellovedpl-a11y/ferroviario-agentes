@@ -28,17 +28,13 @@ def buscar_todos_tickers() -> list[str]:
         t = s.get("stock", "")
         if not t:
             continue
-        # Exclui BDRs (terminam em 2 dígitos tipo 34, 35: AAPL34, GOOGL34)
-        # Mantém "11" pois é sufixo de FIIs e ETFs (HGLG11, BOVA11)
-        if t[-2:].isdigit() and t[-2:] != "11":
-            continue
-        # Exclui mercado fracionário (mesmo ativo do lote padrão, lote de 1-99)
+        # Exclui mercado fracionário (lote de 1-99 do mesmo ativo do lote padrão)
         if t.endswith("F"):
             continue
         if len(t) >= 4 and t[:4].isalpha():
             tickers.append(t)
 
-    print(f"  {len(tickers)} ativos brasileiros filtrados")
+    print(f"  {len(tickers)} ativos filtrados (BDRs incluídos, fracionário excluído)")
     return tickers
 
 
@@ -119,7 +115,12 @@ def buscar_cotacoes(tickers: list[str]) -> list[dict]:
             "date": hoje,
         })
 
-    print(f"  {len(resultados)} ativos processados")
+    # Descarta não-listadas: sem preço OU sem nome (yfinance retorna vazio quando o ticker
+    # foi descontinuado, suspenso ou não tem mais negociação ativa).
+    antes = len(resultados)
+    resultados = [r for r in resultados if r["price"] is not None and r["name"]]
+    descartados = antes - len(resultados)
+    print(f"  {len(resultados)} ativos processados ({descartados} não-listadas descartadas)")
     return resultados
 
 
