@@ -1,3 +1,4 @@
+import datetime as _dt
 import json
 import os
 import time
@@ -206,6 +207,118 @@ def _to_pct(v):
         return None
 
 
+# ---------- Macro indicadores ----------
+
+def coletar_macro() -> list[dict]:
+    """Coleta histórico recente de índices/câmbio/juros para alimentar relatórios.
+
+    Fontes (todas gratuitas, sem chave além do BRAPI_TOKEN já existente):
+    - yfinance ^BVSP        → Ibovespa (Yahoo Finance)
+    - BRAPI /quote/IFIX     → IFIX (Yahoo não tem)
+    - BCB SGS série 1       → USDBRL PTAX (referência oficial)
+    - BCB SGS série 432     → Taxa Selic meta (% a.a.)
+    - BCB SGS série 12      → CDI diário (%)
+    - BCB SGS série 433     → IPCA mensal (%)
+    - BCB SGS série 13522   → IPCA acumulado 12 meses (%)
+
+    Faz upsert dos últimos 90 dias todo dia — duplicatas (PK code,date) são
+    sobrescritas com o valor mais recente, então erros não corrompem dados.
+    """
+    print("Macro > coletando índices/câmbio/juros")
+    rows: list[dict] = []
+    today = _dt.date.today()
+    start = today - _dt.timedelta(days=90)
+
+    # 1) Ibov via yfinance
+    try:
+        hist = yf.Ticker("^BVSP").history(
+            start=start, end=today + _dt.timedelta(days=1), auto_adjust=True
+        )
+        for ts, close in hist["Close"].items():
+            v = float(close)
+            if v == v:  # filtra NaN
+                rows.append({
+                    "code": "IBOV",
+                    "date": ts.strftime("%Y-%m-%d"),
+                    "value": v,
+                    "source": "yfinance",
+                })
+        print(f"  IBOV: {sum(1 for r in rows if r['code'] == 'IBOV')} pontos")
+    except Exception as e:
+        print(f"  IBOV: erro {e}")
+
+    # 2) IFIX via BRAPI (Yahoo não cobre)
+    if BRAPI_TOKEN:
+        try:
+            resp = requests.get(
+                f"{BRAPI_BASE}/quote/IFIX",
+                params={"token": BRAPI_TOKEN, "range": "3mo", "interval": "1d"},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                results = (resp.json() or {}).get("results") or []
+                hist_data = results[0].get("historicalDataPrice") if results else []
+                for item in hist_data or []:
+                    ts = _dt.datetime.fromtimestamp(item["date"]).date().isoformat()
+                    val = item.get("close")
+                    if val is not None:
+                        rows.append({
+                            "code": "IFIX",
+                            "date": ts,
+                            "value": float(val),
+                            "source": "brapi",
+                        })
+                print(f"  IFIX: {sum(1 for r in rows if r['code'] == 'IFIX')} pontos")
+            else:
+                print(f"  IFIX: status {resp.status_code}")
+        except Exception as e:
+            print(f"  IFIX: erro {e}")
+    else:
+        print("  IFIX: BRAPI_TOKEN ausente, pulando")
+
+    # 3) BCB SGS
+    bcb_series = {
+        1:     "USDBRL",
+        432:   "SELIC_META",
+        12:    "CDI",
+        433:   "IPCA_MES",
+        13522: "IPCA_12M",
+    }
+    for code_num, label in bcb_series.items():
+        try:
+            url = (
+                f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{code_num}/dados"
+                f"?formato=json&dataInicial={start.strftime('%d/%m/%Y')}"
+                f"&dataFinal={today.strftime('%d/%m/%Y')}"
+            )
+            resp = requests.get(url, timeout=15)
+            if resp.status_code != 200:
+                print(f"  {label}: status {resp.status_code}")
+                continue
+            for item in resp.json() or []:
+                rows.append({
+                    "code": label,
+                    "date": _dt.datetime.strptime(item["data"], "%d/%m/%Y").strftime("%Y-%m-%d"),
+                    "value": float(item["valor"]),
+                    "source": "bcb",
+                })
+            print(f"  {label}: {sum(1 for r in rows if r['code'] == label)} pontos")
+        except Exception as e:
+            print(f"  {label}: erro {e}")
+
+    print(f"Macro > total: {len(rows)} pontos")
+    return rows
+
+
+def salvar_macro(rows: list[dict]):
+    """Upsert idempotente em macro_indicators (PK code+date)."""
+    if not rows:
+        return
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    supabase.table("macro_indicators").upsert(rows, on_conflict="code,date").execute()
+    print(f"  macro_indicators: {len(rows)} linhas upsert")
+
+
 # ---------- Normalização ----------
 
 def normalizar(row: dict, hoje: str) -> dict:
@@ -296,6 +409,12 @@ def salvar(normalizado: list[dict]):
 def main():
     print("=== Coletor Ferroviário Investidor ===")
     hoje = date.today().isoformat()
+
+    # Macro primeiro (rápido, ~10-20s) — falha aqui não bloqueia stocks.
+    try:
+        salvar_macro(coletar_macro())
+    except Exception as e:
+        print(f"Erro macro (não bloqueia): {e}")
 
     raw = []
     raw.extend(coletar_stocks_e_fiis())
